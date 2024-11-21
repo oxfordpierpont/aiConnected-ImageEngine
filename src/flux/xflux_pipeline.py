@@ -49,6 +49,8 @@ class XFluxPipeline:
         self.lora_types_to_names = {
             "realism": "lora.safetensors",
         }
+        self.annotator = None
+        self.controlnet = None
         self.controlnet_loaded = False
         self.ip_loaded = False
 
@@ -132,8 +134,8 @@ class XFluxPipeline:
         self.model.set_attn_processor(lora_attn_procs)
 
     def set_controlnet(self, control_type: str, local_path: str = None, repo_id: str = None, name: str = None):
-        self.model.to(self.device)
-        self.controlnet = load_controlnet(self.model_type, self.device).to(torch.bfloat16)
+        self.model.to("cpu" if self.offload else self.device)
+        self.controlnet = load_controlnet(self.model_type, "cpu" if self.offload else self.device).to(torch.bfloat16)
 
         checkpoint = load_checkpoint(local_path, repo_id, name)
         self.controlnet.load_state_dict(checkpoint, strict=False)
@@ -296,6 +298,9 @@ class XFluxPipeline:
             if self.offload:
                 self.offload_model_to_cpu(self.t5, self.clip)
                 self.model = self.model.to(self.device)
+                if self.controlnet is not None:
+                    self.controlnet = self.controlnet.to(self.device)
+
             if self.controlnet_loaded:
                 x = denoise_controlnet(
                     self.model,
@@ -334,6 +339,9 @@ class XFluxPipeline:
 
             if self.offload:
                 self.offload_model_to_cpu(self.model)
+                if self.controlnet is not None:
+                    self.offload_model_to_cpu(self.controlnet)
+
                 self.ae.decoder.to(x.device)
             x = unpack(x.float(), height, width)
             x = self.ae.decode(x)
